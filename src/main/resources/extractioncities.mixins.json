@@ -1,0 +1,16 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "com.scarasol.extractioncities.mixin",
+  "compatibilityLevel": "JAVA_17",
+  "refmap": "extractioncities.refmap.json",
+  "mixins": [
+    "ChunkStatusMixin",
+    "ServerLevelMixin",
+    "StructureManagerMixin",
+    "accessor.MinecraftServerAccessor"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
