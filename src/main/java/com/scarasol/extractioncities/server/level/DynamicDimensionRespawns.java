@@ -106,7 +106,7 @@ public final class DynamicDimensionRespawns {
         if (record.get().allowRespawn()) {
             PENDING_RESPAWNS.put(original.getUUID(), RespawnPlan.dynamic(deathDimension, getStoredDynamicRespawn(original.getUUID(), deathDimension)));
         } else {
-            PENDING_RESPAWNS.remove(original.getUUID());
+            PENDING_RESPAWNS.put(original.getUUID(), RespawnPlan.overworld(captureOverworldRespawn(original)));
         }
     }
 
@@ -124,7 +124,13 @@ public final class DynamicDimensionRespawns {
             return;
         }
 
-        teleportToDynamicRespawnOrFallback(player, plan.dynamicDimension, plan.dynamic);
+        if (plan.isOverworld()) {
+            teleportToOverworldRespawnOrSpawn(player, plan.respawn);
+            clearVanillaDynamicRespawn(player);
+            return;
+        }
+
+        teleportToDynamicRespawnOrFallback(player, plan.dynamicDimension, plan.respawn);
     }
 
     public static void clear() {
@@ -144,6 +150,7 @@ public final class DynamicDimensionRespawns {
 
         RespawnDestination target = destination.get();
         player.teleportTo(level, target.position().x(), target.position().y(), target.position().z(), Set.of(), target.yRot(), player.getXRot());
+        DynamicDimensionGameModes.applyForCurrentDimension(player);
         return true;
     }
 
@@ -171,6 +178,7 @@ public final class DynamicDimensionRespawns {
         if (destination.isPresent()) {
             RespawnDestination target = destination.get();
             player.teleportTo(overworld, target.position().x(), target.position().y(), target.position().z(), Set.of(), target.yRot(), player.getXRot());
+            DynamicDimensionGameModes.applyForCurrentDimension(player);
             return;
         }
 
@@ -189,6 +197,7 @@ public final class DynamicDimensionRespawns {
         if (destination.isPresent()) {
             RespawnDestination target = destination.get();
             player.teleportTo(level, target.position().x(), target.position().y(), target.position().z(), Set.of(), target.yRot(), player.getXRot());
+            DynamicDimensionGameModes.applyForCurrentDimension(player);
             return;
         }
 
@@ -212,6 +221,7 @@ public final class DynamicDimensionRespawns {
     private static void teleportToExactPoint(ServerPlayer player, ServerLevel level, BlockPos position) {
         level.getChunk(position);
         player.teleportTo(level, position.getX() + 0.5D, position.getY(), position.getZ() + 0.5D, Set.of(), player.getYRot(), player.getXRot());
+        DynamicDimensionGameModes.applyForCurrentDimension(player);
     }
 
     private static BlockPos findSurfacePoint(ServerLevel level, BlockPos position) {
@@ -317,9 +327,17 @@ public final class DynamicDimensionRespawns {
         player.setRespawnPosition(Level.OVERWORLD, null, 0.0F, false, false);
     }
 
-    private record RespawnPlan(ResourceKey<Level> dynamicDimension, @Nullable RespawnPoint dynamic) {
+    private record RespawnPlan(@Nullable ResourceKey<Level> dynamicDimension, @Nullable RespawnPoint respawn) {
         private static RespawnPlan dynamic(ResourceKey<Level> dimension, @Nullable RespawnPoint respawn) {
             return new RespawnPlan(dimension, respawn);
+        }
+
+        private static RespawnPlan overworld(@Nullable RespawnPoint respawn) {
+            return new RespawnPlan(null, respawn);
+        }
+
+        private boolean isOverworld() {
+            return dynamicDimension == null;
         }
     }
 

@@ -7,6 +7,7 @@ import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.exceptions.DynamicCommandExceptionType;
 import com.mojang.brigadier.exceptions.SimpleCommandExceptionType;
 import com.scarasol.extractioncities.ExtractionCitiesMod;
+import com.scarasol.extractioncities.compat.ModCompat;
 import com.scarasol.extractioncities.server.level.DynamicDimensionManager;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -26,6 +27,8 @@ public final class SetDynamicDimensionCommand {
     private static final String ARG_ENABLED = "enabled";
     private static final String ARG_POS = "pos";
 
+    private static final SimpleCommandExceptionType ERROR_LOST_CITIES_NOT_INSTALLED = new SimpleCommandExceptionType(
+            Component.translatable("commands.extractioncities.ecdim.error.lostcities_not_installed"));
     private static final SimpleCommandExceptionType ERROR_SET_FAILED = new SimpleCommandExceptionType(
             Component.translatable("commands.extractioncities.ecdim.error.set_failed"));
     private static final DynamicCommandExceptionType ERROR_UNKNOWN_DYNAMIC_DIMENSION = new DynamicCommandExceptionType(id ->
@@ -43,6 +46,12 @@ public final class SetDynamicDimensionCommand {
                         .then(Commands.literal("structure")
                                 .then(Commands.argument(ARG_ENABLED, BoolArgumentType.bool())
                                         .executes(context -> setStructure(
+                                                context.getSource(),
+                                                DynamicDimensionCommandIds.parseManagedId(StringArgumentType.getString(context, ARG_ID)),
+                                                BoolArgumentType.getBool(context, ARG_ENABLED)))))
+                        .then(Commands.literal("lostcities")
+                                .then(Commands.argument(ARG_ENABLED, BoolArgumentType.bool())
+                                        .executes(context -> setLostCities(
                                                 context.getSource(),
                                                 DynamicDimensionCommandIds.parseManagedId(StringArgumentType.getString(context, ARG_ID)),
                                                 BoolArgumentType.getBool(context, ARG_ENABLED)))))
@@ -87,6 +96,28 @@ public final class SetDynamicDimensionCommand {
                 "commands.extractioncities.ecdim.set.structure.success",
                 id,
                 DynamicDimensionCommands.booleanName(generateStructures)), true);
+        return 1;
+    }
+
+    private static int setLostCities(CommandSourceStack source, ResourceLocation id, boolean generateLostCities) throws CommandSyntaxException {
+        if (DynamicDimensionManager.getRecord(id).isEmpty()) {
+            throw ERROR_UNKNOWN_DYNAMIC_DIMENSION.create(id);
+        }
+        if (!ModCompat.isLoadTlc()) {
+            throw ERROR_LOST_CITIES_NOT_INSTALLED.create();
+        }
+
+        try {
+            DynamicDimensionManager.setGenerateLostCities(source.getServer(), id, generateLostCities);
+        } catch (IOException exception) {
+            ExtractionCitiesMod.LOGGER.warn("Failed to update dynamic dimension Lost Cities setting {}", id, exception);
+            throw ERROR_SET_FAILED.create();
+        }
+
+        source.sendSuccess(() -> Component.translatable(
+                "commands.extractioncities.ecdim.set.lostcities.success",
+                id,
+                DynamicDimensionCommands.booleanName(generateLostCities)), true);
         return 1;
     }
 

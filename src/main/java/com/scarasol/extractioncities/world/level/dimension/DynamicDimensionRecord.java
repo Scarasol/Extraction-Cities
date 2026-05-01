@@ -14,6 +14,7 @@ public record DynamicDimensionRecord(
         DynamicDimensionStorageMode storage,
         long seed,
         boolean generateStructures,
+        boolean generateLostCities,
         @Nullable GameType gameMode,
         @Nullable BlockPos teleportPoint,
         boolean allowRespawn

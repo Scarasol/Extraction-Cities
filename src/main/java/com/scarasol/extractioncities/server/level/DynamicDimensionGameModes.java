@@ -32,6 +32,10 @@ public final class DynamicDimensionGameModes {
         applyForDimension(player, targetDimension);
     }
 
+    public static void applyForCurrentDimension(ServerPlayer player) {
+        applyForDimension(player, player.level().dimension());
+    }
+
     public static void clear() {
         AUTOMATIC_GAME_MODES.clear();
     }

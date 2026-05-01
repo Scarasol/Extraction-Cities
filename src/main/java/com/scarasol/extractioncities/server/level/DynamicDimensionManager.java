@@ -1,6 +1,8 @@
 package com.scarasol.extractioncities.server.level;
 
 import com.scarasol.extractioncities.ExtractionCitiesMod;
+import com.scarasol.extractioncities.compat.ModCompat;
+import com.scarasol.extractioncities.compat.tlc.TlcCompat;
 import com.scarasol.extractioncities.configuration.CommonConfig;
 import com.scarasol.extractioncities.mixin.accessor.MinecraftServerAccessor;
 import com.scarasol.extractioncities.world.level.dimension.DynamicDimensionRecord;
@@ -79,10 +81,7 @@ public final class DynamicDimensionManager {
         DYNAMIC_DIMENSIONS.clear();
         BORDER_LISTENERS.clear();
         DynamicDimensionSeeds.clear();
-    }
-
-    public static synchronized ServerLevel createDimension(MinecraftServer server, ResourceLocation id, DynamicDimensionStorageMode storage, long seed) throws IOException {
-        return createDimension(server, id, storage, seed, ExtractionCitiesDimensions.OVERWORLD_GENERATOR_ID, null);
+        refreshLostCitiesProfiles();
     }
 
     public static synchronized ServerLevel createDimension(MinecraftServer server, ResourceLocation id, DynamicDimensionStorageMode storage, long seed, ResourceLocation generator, @Nullable ResourceLocation biome) throws IOException {
@@ -94,6 +93,7 @@ public final class DynamicDimensionManager {
                 storage,
                 seed,
                 CommonConfig.DEFAULT_GENERATE_STRUCTURES.get(),
+                CommonConfig.DEFAULT_GENERATE_LOST_CITIES.get(),
                 CommonConfig.defaultGameMode(),
                 null,
                 CommonConfig.DEFAULT_ALLOW_RESPAWN.get());
@@ -122,10 +122,37 @@ public final class DynamicDimensionManager {
                 record.storage(),
                 record.seed(),
                 generateStructures,
+                record.generateLostCities(),
                 record.gameMode(),
                 record.teleportPoint(),
                 record.allowRespawn());
         DYNAMIC_DIMENSIONS.put(id, updated);
+        if (updated.storage() == DynamicDimensionStorageMode.PERSISTENT) {
+            saveManifest(server);
+        }
+        return updated;
+    }
+
+    public static synchronized DynamicDimensionRecord setGenerateLostCities(MinecraftServer server, ResourceLocation id, boolean generateLostCities) throws IOException {
+        DynamicDimensionRecord record = DYNAMIC_DIMENSIONS.get(id);
+        if (record == null) {
+            throw new IllegalArgumentException("Unknown dynamic dimension: " + id);
+        }
+
+        DynamicDimensionRecord updated = new DynamicDimensionRecord(
+                record.id(),
+                record.dimensionType(),
+                record.generator(),
+                record.biome(),
+                record.storage(),
+                record.seed(),
+                record.generateStructures(),
+                generateLostCities,
+                record.gameMode(),
+                record.teleportPoint(),
+                record.allowRespawn());
+        DYNAMIC_DIMENSIONS.put(id, updated);
+        refreshLostCitiesProfiles();
         if (updated.storage() == DynamicDimensionStorageMode.PERSISTENT) {
             saveManifest(server);
         }
@@ -146,6 +173,7 @@ public final class DynamicDimensionManager {
                 record.storage(),
                 record.seed(),
                 record.generateStructures(),
+                record.generateLostCities(),
                 gameMode,
                 record.teleportPoint(),
                 record.allowRespawn());
@@ -170,6 +198,7 @@ public final class DynamicDimensionManager {
                 record.storage(),
                 record.seed(),
                 record.generateStructures(),
+                record.generateLostCities(),
                 record.gameMode(),
                 teleportPoint,
                 record.allowRespawn());
@@ -194,6 +223,7 @@ public final class DynamicDimensionManager {
                 record.storage(),
                 record.seed(),
                 record.generateStructures(),
+                record.generateLostCities(),
                 record.gameMode(),
                 record.teleportPoint(),
                 allowRespawn);
@@ -217,6 +247,24 @@ public final class DynamicDimensionManager {
 
         if (level instanceof WorldGenRegion region) {
             return shouldGenerateStructures(region.getLevel(), fallback);
+        }
+
+        return fallback;
+    }
+
+    public static boolean shouldGenerateLostCities(ServerLevel level, boolean fallback) {
+        return getRecord(level.dimension().location())
+                .map(DynamicDimensionRecord::generateLostCities)
+                .orElse(fallback);
+    }
+
+    public static boolean shouldGenerateLostCities(LevelAccessor level, boolean fallback) {
+        if (level instanceof ServerLevel serverLevel) {
+            return shouldGenerateLostCities(serverLevel, fallback);
+        }
+
+        if (level instanceof WorldGenRegion region) {
+            return shouldGenerateLostCities(region.getLevel(), fallback);
         }
 
         return fallback;
@@ -250,6 +298,7 @@ public final class DynamicDimensionManager {
 
         DYNAMIC_DIMENSIONS.remove(id);
         DynamicDimensionSeeds.unregister(levelKey);
+        refreshLostCitiesProfiles();
         if (record.storage() == DynamicDimensionStorageMode.PERSISTENT) {
             saveManifest(server);
         }
@@ -294,9 +343,9 @@ public final class DynamicDimensionManager {
         BORDER_LISTENERS.put(record.id(), borderListener);
         server.forgeGetWorldMap().put(levelKey, level);
         server.markWorldsDirty();
-        MinecraftForge.EVENT_BUS.post(new LevelEvent.Load(level));
-
         DYNAMIC_DIMENSIONS.put(record.id(), record);
+        refreshLostCitiesProfiles();
+        MinecraftForge.EVENT_BUS.post(new LevelEvent.Load(level));
         if (writeManifest && record.storage() == DynamicDimensionStorageMode.PERSISTENT) {
             saveManifest(server);
         }
@@ -404,6 +453,12 @@ public final class DynamicDimensionManager {
 
     private static void saveManifest(MinecraftServer server) throws IOException {
         DynamicDimensionManifestStorage.savePersistent(server, DYNAMIC_DIMENSIONS.values());
+    }
+
+    private static void refreshLostCitiesProfiles() {
+        if (ModCompat.isLoadTlc()) {
+            TlcCompat.refreshDynamicDimensionProfiles();
+        }
     }
 
     private static List<ServerPlayer> playersInDimension(MinecraftServer server, ResourceKey<Level> levelKey) {

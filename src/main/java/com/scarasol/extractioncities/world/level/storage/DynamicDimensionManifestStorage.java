@@ -26,7 +26,7 @@ import java.util.Comparator;
 import java.util.List;
 
 public final class DynamicDimensionManifestStorage {
-    private static final int MANIFEST_SCHEMA = 7;
+    private static final int MANIFEST_SCHEMA = 8;
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 
     private DynamicDimensionManifestStorage() {
@@ -103,6 +103,9 @@ public final class DynamicDimensionManifestStorage {
         boolean generateStructures = entry.generateStructures == null
                 ? CommonConfig.DEFAULT_GENERATE_STRUCTURES.get()
                 : entry.generateStructures;
+        boolean generateLostCities = entry.generateLostCities == null
+                ? CommonConfig.DEFAULT_GENERATE_LOST_CITIES.get()
+                : entry.generateLostCities;
         GameType gameMode = entry.gameMode == null || entry.gameMode.isBlank()
                 ? CommonConfig.defaultGameMode()
                 : GameType.byName(entry.gameMode, null);
@@ -126,7 +129,7 @@ public final class DynamicDimensionManifestStorage {
             return null;
         }
 
-        return new DynamicDimensionRecord(id, dimensionType, generator, biome, storage, seed, generateStructures, gameMode, teleportPoint, allowRespawn);
+        return new DynamicDimensionRecord(id, dimensionType, generator, biome, storage, seed, generateStructures, generateLostCities, gameMode, teleportPoint, allowRespawn);
     }
 
     private static ManifestEntry toManifestEntry(DynamicDimensionRecord record) {
@@ -138,6 +141,7 @@ public final class DynamicDimensionManifestStorage {
         entry.storage = record.storage().id();
         entry.seed = record.seed();
         entry.generateStructures = record.generateStructures();
+        entry.generateLostCities = record.generateLostCities();
         entry.gameMode = record.gameMode() == null ? null : record.gameMode().getName();
         entry.teleportPoint = toManifestBlockPos(record.teleportPoint());
         entry.allowRespawn = record.allowRespawn();
@@ -178,6 +182,7 @@ public final class DynamicDimensionManifestStorage {
         String storage;
         Long seed;
         Boolean generateStructures;
+        Boolean generateLostCities;
         String gameMode;
         ManifestBlockPos teleportPoint;
         Boolean allowRespawn;

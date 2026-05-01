@@ -4,11 +4,15 @@
   "package": "com.scarasol.extractioncities.mixin",
   "compatibilityLevel": "JAVA_17",
   "refmap": "extractioncities.refmap.json",
+  "plugin": "com.scarasol.extractioncities.mixin.plugin.MixinPlugin",
   "mixins": [
     "ChunkStatusMixin",
+    "ChunkGeneratorMixin",
     "ServerLevelMixin",
     "StructureManagerMixin",
-    "accessor.MinecraftServerAccessor"
+    "accessor.MinecraftServerAccessor",
+    "tlc.ConfigMixin",
+    "tlc.LostCityFeatureMixin"
   ],
   "injectors": {
     "defaultRequire": 1

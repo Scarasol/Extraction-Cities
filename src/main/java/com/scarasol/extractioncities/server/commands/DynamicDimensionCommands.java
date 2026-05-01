@@ -7,7 +7,7 @@ import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.exceptions.DynamicCommandExceptionType;
-import com.scarasol.extractioncities.ExtractionCitiesMod;
+import com.scarasol.extractioncities.server.level.DynamicDimensionGameModes;
 import com.scarasol.extractioncities.server.level.DynamicDimensionManager;
 import com.scarasol.extractioncities.server.level.DynamicDimensionRespawns;
 import com.scarasol.extractioncities.world.level.dimension.DynamicDimensionRecord;
@@ -126,6 +126,7 @@ public final class DynamicDimensionCommands {
                     record.generator(),
                     record.biome() == null ? "-" : record.biome(),
                     booleanName(record.generateStructures()),
+                    booleanName(record.generateLostCities()),
                     record.gameMode() == null ? "-" : gameModeName(record.gameMode()),
                     record.teleportPoint() == null ? "-" : positionName(record.teleportPoint()),
                     booleanName(record.allowRespawn())), false);
@@ -209,6 +210,7 @@ public final class DynamicDimensionCommands {
     private static void teleportPlayerToPoint(ServerPlayer player, ServerLevel target, BlockPos position) {
         target.getChunk(position);
         player.teleportTo(target, position.getX() + 0.5D, position.getY(), position.getZ() + 0.5D, Set.of(), player.getYRot(), player.getXRot());
+        DynamicDimensionGameModes.applyForCurrentDimension(player);
     }
 
     private static BlockPos findRandomSurfacePoint(ServerLevel target, BlockPos base, int range) {
