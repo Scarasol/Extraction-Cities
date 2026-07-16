@@ -1,11 +1,14 @@
 package com.scarasol.extractioncities.server.level;
 
 import com.scarasol.extractioncities.ExtractionCitiesMod;
+import com.scarasol.extractioncities.configuration.CommonConfig;
 import com.scarasol.extractioncities.world.level.dimension.DynamicDimensionRecord;
 import com.scarasol.extractioncities.world.level.dimension.DynamicDimensionStorageMode;
+import com.scarasol.extractioncities.world.level.dimension.ExtractionCitiesDimensions;
 import com.scarasol.extractioncities.world.level.storage.DynamicDimensionRespawnStorage;
 import com.scarasol.extractioncities.world.level.storage.DynamicDimensionRespawnStorage.RespawnPoint;
 import net.minecraft.core.BlockPos;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
@@ -14,8 +17,6 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.event.entity.player.PlayerSetSpawnEvent;
@@ -31,6 +32,7 @@ import java.util.Set;
 import java.util.UUID;
 
 public final class DynamicDimensionRespawns {
+    private static final String LAST_DYNAMIC_DIMENSION_TAG = ExtractionCitiesMod.MODID + ".last_dynamic_dimension";
     private static final Map<UUID, RespawnPlan> PENDING_RESPAWNS = new HashMap<>();
 
     private DynamicDimensionRespawns() {
@@ -44,12 +46,45 @@ public final class DynamicDimensionRespawns {
         }
     }
 
+    public static void onPlayerLoggedIn(ServerPlayer player) {
+        ResourceKey<Level> currentDimension = player.level().dimension();
+        if (rememberIfDynamicDimension(player, currentDimension)) {
+            return;
+        }
+
+        ResourceLocation lastDynamicDimension = getRememberedDynamicDimension(player);
+        if (lastDynamicDimension == null) {
+            return;
+        }
+
+        if (DynamicDimensionManager.getRecord(lastDynamicDimension).isEmpty()) {
+            clearRememberedDynamicDimension(player);
+            if (CommonConfig.FORCE_DEATH_ON_MISSING_SESSION_DIMENSION.get()) {
+                DynamicDimensionForcedReturnDeaths.kill(player);
+                return;
+            }
+            teleportToOverworldRespawnOrSpawn(player);
+            clearVanillaDynamicRespawn(player);
+            return;
+        }
+
+        clearRememberedDynamicDimension(player);
+    }
+
     public static void onPlayerLoggedOut(ServerPlayer player) {
+        rememberIfDynamicDimension(player, player.level().dimension());
         PENDING_RESPAWNS.remove(player.getUUID());
     }
 
+    public static void onPlayerChangedDimension(ServerPlayer player, ResourceKey<Level> targetDimension) {
+        if (!rememberIfDynamicDimension(player, targetDimension)) {
+            clearRememberedDynamicDimension(player);
+        }
+    }
+
     public static void removeDimension(MinecraftServer server, ResourceLocation dimension) throws IOException {
-        PENDING_RESPAWNS.entrySet().removeIf(entry -> dimension.equals(entry.getValue().dynamicDimension().location()));
+        PENDING_RESPAWNS.entrySet().removeIf(entry -> entry.getValue().dynamicDimension() != null
+                && dimension.equals(entry.getValue().dynamicDimension().location()));
         DynamicDimensionRespawnStorage.removeDimension(dimension);
         savePersistentRespawns(server);
     }
@@ -150,6 +185,7 @@ public final class DynamicDimensionRespawns {
 
         RespawnDestination target = destination.get();
         player.teleportTo(level, target.position().x(), target.position().y(), target.position().z(), Set.of(), target.yRot(), player.getXRot());
+        rememberOrClearDynamicDimension(player, level.dimension());
         DynamicDimensionGameModes.applyForCurrentDimension(player);
         return true;
     }
@@ -178,6 +214,7 @@ public final class DynamicDimensionRespawns {
         if (destination.isPresent()) {
             RespawnDestination target = destination.get();
             player.teleportTo(overworld, target.position().x(), target.position().y(), target.position().z(), Set.of(), target.yRot(), player.getXRot());
+            clearRememberedDynamicDimension(player);
             DynamicDimensionGameModes.applyForCurrentDimension(player);
             return;
         }
@@ -197,6 +234,7 @@ public final class DynamicDimensionRespawns {
         if (destination.isPresent()) {
             RespawnDestination target = destination.get();
             player.teleportTo(level, target.position().x(), target.position().y(), target.position().z(), Set.of(), target.yRot(), player.getXRot());
+            rememberOrClearDynamicDimension(player, level.dimension());
             DynamicDimensionGameModes.applyForCurrentDimension(player);
             return;
         }
@@ -221,51 +259,12 @@ public final class DynamicDimensionRespawns {
     private static void teleportToExactPoint(ServerPlayer player, ServerLevel level, BlockPos position) {
         level.getChunk(position);
         player.teleportTo(level, position.getX() + 0.5D, position.getY(), position.getZ() + 0.5D, Set.of(), player.getYRot(), player.getXRot());
+        rememberOrClearDynamicDimension(player, level.dimension());
         DynamicDimensionGameModes.applyForCurrentDimension(player);
     }
 
     private static BlockPos findSurfacePoint(ServerLevel level, BlockPos position) {
-        level.getChunk(position);
-        return new BlockPos(position.getX(), findSurfaceY(level, position), position.getZ());
-    }
-
-    private static int findSurfaceY(ServerLevel level, BlockPos position) {
-        int surfaceY = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, position.getX(), position.getZ());
-        int scannedY = scanForSurfaceY(level, position.getX(), position.getZ(), surfaceY);
-        if (scannedY != Integer.MIN_VALUE) {
-            return scannedY;
-        }
-
-        return Math.max(level.getMinBuildHeight() + 1, Math.min(position.getY(), level.getMaxBuildHeight() - 2));
-    }
-
-    private static int scanForSurfaceY(ServerLevel level, int x, int z, int surfaceY) {
-        int minY = level.getMinBuildHeight();
-        int maxY = level.getMaxBuildHeight();
-        int startY = Math.min(maxY - 2, Math.max(minY + 1, surfaceY));
-
-        BlockPos.MutableBlockPos below = new BlockPos.MutableBlockPos();
-        BlockPos.MutableBlockPos feet = new BlockPos.MutableBlockPos();
-        BlockPos.MutableBlockPos head = new BlockPos.MutableBlockPos();
-        for (int y = startY; y > minY; y--) {
-            below.set(x, y - 1, z);
-            feet.set(x, y, z);
-            head.set(x, y + 1, z);
-            if (isSurface(level, below) && isPassable(level, feet) && isPassable(level, head)) {
-                return y;
-            }
-        }
-
-        return Integer.MIN_VALUE;
-    }
-
-    private static boolean isSurface(ServerLevel level, BlockPos pos) {
-        BlockState state = level.getBlockState(pos);
-        return !state.getCollisionShape(level, pos).isEmpty() || !state.getFluidState().isEmpty();
-    }
-
-    private static boolean isPassable(ServerLevel level, BlockPos pos) {
-        return level.getBlockState(pos).getCollisionShape(level, pos).isEmpty();
+        return DynamicDimensionSurfacePoints.findNearOrFallback(level, position);
     }
 
     @Nullable
@@ -316,7 +315,8 @@ public final class DynamicDimensionRespawns {
 
     private static void clearVanillaDynamicRespawn(ServerPlayer player) {
         BlockPos position = player.getRespawnPosition();
-        if (position == null || DynamicDimensionManager.getRecord(player.getRespawnDimension().location()).isEmpty()) {
+        ResourceLocation dimension = player.getRespawnDimension().location();
+        if (position == null || (DynamicDimensionManager.getRecord(dimension).isEmpty() && !ExtractionCitiesDimensions.isManagedNamespace(dimension))) {
             return;
         }
 
@@ -325,6 +325,39 @@ public final class DynamicDimensionRespawns {
 
     private static void clearVanillaRespawnPoint(ServerPlayer player) {
         player.setRespawnPosition(Level.OVERWORLD, null, 0.0F, false, false);
+    }
+
+    private static boolean rememberIfDynamicDimension(ServerPlayer player, ResourceKey<Level> dimension) {
+        if (DynamicDimensionManager.getRecord(dimension.location()).isEmpty()) {
+            return false;
+        }
+
+        player.getPersistentData().putString(LAST_DYNAMIC_DIMENSION_TAG, dimension.location().toString());
+        return true;
+    }
+
+    private static void rememberOrClearDynamicDimension(ServerPlayer player, ResourceKey<Level> dimension) {
+        if (!rememberIfDynamicDimension(player, dimension)) {
+            clearRememberedDynamicDimension(player);
+        }
+    }
+
+    @Nullable
+    private static ResourceLocation getRememberedDynamicDimension(ServerPlayer player) {
+        CompoundTag data = player.getPersistentData();
+        if (!data.contains(LAST_DYNAMIC_DIMENSION_TAG)) {
+            return null;
+        }
+
+        ResourceLocation dimension = ResourceLocation.tryParse(data.getString(LAST_DYNAMIC_DIMENSION_TAG));
+        if (dimension == null) {
+            clearRememberedDynamicDimension(player);
+        }
+        return dimension;
+    }
+
+    private static void clearRememberedDynamicDimension(ServerPlayer player) {
+        player.getPersistentData().remove(LAST_DYNAMIC_DIMENSION_TAG);
     }
 
     private record RespawnPlan(@Nullable ResourceKey<Level> dynamicDimension, @Nullable RespawnPoint respawn) {

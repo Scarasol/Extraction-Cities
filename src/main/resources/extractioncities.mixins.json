@@ -11,8 +11,12 @@
     "ServerLevelMixin",
     "StructureManagerMixin",
     "accessor.MinecraftServerAccessor",
+    "accessor.StructureManagerAccessor",
     "tlc.ConfigMixin",
-    "tlc.LostCityFeatureMixin"
+    "tlc.BuildingInfoMixin",
+    "tlc.DefaultDimensionInfoMixin",
+    "tlc.LostCityFeatureMixin",
+    "tlc.TimedCacheMixin"
   ],
   "injectors": {
     "defaultRequire": 1

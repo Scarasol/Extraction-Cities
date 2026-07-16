@@ -11,7 +11,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 @Mixin(value = LostCityFeature.class, remap = false)
 public abstract class LostCityFeatureMixin {
-    @Inject(method = "place", at = @At("HEAD"), cancellable = true)
+    // ForgeGradle exposes the official name in dev, while the production TLC jar keeps the SRG name.
+    @Inject(method = {"place", "m_142674_"}, at = @At("HEAD"), cancellable = true)
     private void extractioncities$skipBiomePlacedFeatureForDynamicDimensions(FeaturePlaceContext<NoneFeatureConfiguration> context, CallbackInfoReturnable<Boolean> callbackInfo) {
         if (TlcCompat.shouldSkipBiomePlacedFeature(context.level())) {
             callbackInfo.setReturnValue(false);

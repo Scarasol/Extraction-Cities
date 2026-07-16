@@ -1,0 +1,26 @@
+{
+  "outsidestyle": "outside",
+  "settings": {
+    "railwayavoidance": "ignore",
+    "railpartheight6": 1
+  },
+  "multisettings": {
+    "areasize": 10,
+    "minimum": 0,
+    "maximum": 0,
+    "correctstylefactor": 1.0,
+    "attempts": 50
+  },
+  "scattered": {
+    "areasize": 8,
+    "chance": 0.0,
+    "weightnone": 100,
+    "list": []
+  },
+  "citystyles": [
+    {
+      "factor": 1.0,
+      "citystyle": "extractioncities:single_building_test"
+    }
+  ]
+}

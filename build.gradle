@@ -144,7 +144,8 @@ dependencies {
         jarJar.ranged(it, "[0.3.6,)")
     }
     implementation fg.deobf("curse.maven:the-lost-cities-269024:7432706")
-
+    compileOnly fg.deobf("curse.maven:lc2h-1325431:7978635")
+    compileOnly fg.deobf("curse.maven:quantified-api-1397967:8334582")
     // Example mod dependency with JEI - using fg.deobf() ensures the dependency is remapped to your development mappings
     // The JEI API is declared for compile time use, while the full JEI artifact is used at runtime
     // compileOnly fg.deobf("mezz.jei:jei-${mc_version}-common-api:${jei_version}")

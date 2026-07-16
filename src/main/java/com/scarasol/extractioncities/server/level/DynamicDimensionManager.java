@@ -5,14 +5,17 @@ import com.scarasol.extractioncities.compat.ModCompat;
 import com.scarasol.extractioncities.compat.tlc.TlcCompat;
 import com.scarasol.extractioncities.configuration.CommonConfig;
 import com.scarasol.extractioncities.mixin.accessor.MinecraftServerAccessor;
+import com.scarasol.extractioncities.mixin.accessor.StructureManagerAccessor;
 import com.scarasol.extractioncities.world.level.dimension.DynamicDimensionRecord;
 import com.scarasol.extractioncities.world.level.dimension.DynamicDimensionStorageMode;
 import com.scarasol.extractioncities.world.level.dimension.ExtractionCitiesDimensions;
+import com.scarasol.extractioncities.world.level.dimension.LostCityBuildingOverride;
 import com.scarasol.extractioncities.world.level.storage.DynamicDimensionManifestStorage;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.core.HolderGetter;
 import net.minecraft.core.Registry;
+import net.minecraft.core.RegistryAccess;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
@@ -23,6 +26,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.LevelAccessor;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.StructureManager;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.FixedBiomeSource;
 import net.minecraft.world.level.block.Blocks;
@@ -35,6 +39,7 @@ import net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator;
 import net.minecraft.world.level.levelgen.flat.FlatLayerInfo;
 import net.minecraft.world.level.levelgen.flat.FlatLevelGeneratorSettings;
 import net.minecraft.world.level.levelgen.placement.PlacedFeature;
+import net.minecraft.world.level.levelgen.structure.Structure;
 import net.minecraft.world.level.levelgen.structure.StructureSet;
 import net.minecraft.world.level.storage.LevelResource;
 import net.minecraftforge.common.MinecraftForge;
@@ -44,6 +49,7 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -93,10 +99,15 @@ public final class DynamicDimensionManager {
                 storage,
                 seed,
                 CommonConfig.DEFAULT_GENERATE_STRUCTURES.get(),
+                CommonConfig.defaultStructureWhitelist(),
                 CommonConfig.DEFAULT_GENERATE_LOST_CITIES.get(),
+                CommonConfig.defaultLostCitiesProfile(),
+                CommonConfig.defaultLostCitiesWorldStyle(),
                 CommonConfig.defaultGameMode(),
                 null,
-                CommonConfig.DEFAULT_ALLOW_RESPAWN.get());
+                CommonConfig.DEFAULT_ALLOW_RESPAWN.get(),
+                CommonConfig.DEFAULT_SAVE.get(),
+                List.of());
         return createDimension(server, record, true);
     }
 
@@ -122,10 +133,71 @@ public final class DynamicDimensionManager {
                 record.storage(),
                 record.seed(),
                 generateStructures,
+                record.structureWhitelist(),
                 record.generateLostCities(),
+                record.lostCitiesProfile(),
+                record.lostCitiesWorldStyle(),
                 record.gameMode(),
                 record.teleportPoint(),
-                record.allowRespawn());
+                record.allowRespawn(),
+                record.save(),
+                record.lostCityBuildingOverrides());
+        DYNAMIC_DIMENSIONS.put(id, updated);
+        if (updated.storage() == DynamicDimensionStorageMode.PERSISTENT) {
+            saveManifest(server);
+        }
+        return updated;
+    }
+
+    public static synchronized DynamicDimensionRecord addStructureWhitelist(MinecraftServer server, ResourceLocation id, ResourceLocation structureId) throws IOException {
+        DynamicDimensionRecord record = DYNAMIC_DIMENSIONS.get(id);
+        if (record == null) {
+            throw new IllegalArgumentException("Unknown dynamic dimension: " + id);
+        }
+
+        Set<ResourceLocation> structureWhitelist = new HashSet<>(record.structureWhitelist());
+        structureWhitelist.add(structureId);
+        return setStructureWhitelist(server, id, structureWhitelist);
+    }
+
+    public static synchronized DynamicDimensionRecord removeStructureWhitelist(MinecraftServer server, ResourceLocation id, ResourceLocation structureId) throws IOException {
+        DynamicDimensionRecord record = DYNAMIC_DIMENSIONS.get(id);
+        if (record == null) {
+            throw new IllegalArgumentException("Unknown dynamic dimension: " + id);
+        }
+
+        Set<ResourceLocation> structureWhitelist = new HashSet<>(record.structureWhitelist());
+        structureWhitelist.remove(structureId);
+        return setStructureWhitelist(server, id, structureWhitelist);
+    }
+
+    public static synchronized DynamicDimensionRecord clearStructureWhitelist(MinecraftServer server, ResourceLocation id) throws IOException {
+        return setStructureWhitelist(server, id, Set.of());
+    }
+
+    private static synchronized DynamicDimensionRecord setStructureWhitelist(MinecraftServer server, ResourceLocation id, Set<ResourceLocation> structureWhitelist) throws IOException {
+        DynamicDimensionRecord record = DYNAMIC_DIMENSIONS.get(id);
+        if (record == null) {
+            throw new IllegalArgumentException("Unknown dynamic dimension: " + id);
+        }
+
+        DynamicDimensionRecord updated = new DynamicDimensionRecord(
+                record.id(),
+                record.dimensionType(),
+                record.generator(),
+                record.biome(),
+                record.storage(),
+                record.seed(),
+                record.generateStructures(),
+                Set.copyOf(structureWhitelist),
+                record.generateLostCities(),
+                record.lostCitiesProfile(),
+                record.lostCitiesWorldStyle(),
+                record.gameMode(),
+                record.teleportPoint(),
+                record.allowRespawn(),
+                record.save(),
+                record.lostCityBuildingOverrides());
         DYNAMIC_DIMENSIONS.put(id, updated);
         if (updated.storage() == DynamicDimensionStorageMode.PERSISTENT) {
             saveManifest(server);
@@ -147,10 +219,77 @@ public final class DynamicDimensionManager {
                 record.storage(),
                 record.seed(),
                 record.generateStructures(),
+                record.structureWhitelist(),
                 generateLostCities,
+                record.lostCitiesProfile(),
+                record.lostCitiesWorldStyle(),
                 record.gameMode(),
                 record.teleportPoint(),
-                record.allowRespawn());
+                record.allowRespawn(),
+                record.save(),
+                record.lostCityBuildingOverrides());
+        DYNAMIC_DIMENSIONS.put(id, updated);
+        refreshLostCitiesProfiles();
+        if (updated.storage() == DynamicDimensionStorageMode.PERSISTENT) {
+            saveManifest(server);
+        }
+        return updated;
+    }
+
+    public static synchronized DynamicDimensionRecord setLostCitiesWorldStyle(MinecraftServer server, ResourceLocation id, String worldStyle) throws IOException {
+        DynamicDimensionRecord record = DYNAMIC_DIMENSIONS.get(id);
+        if (record == null) {
+            throw new IllegalArgumentException("Unknown dynamic dimension: " + id);
+        }
+
+        DynamicDimensionRecord updated = new DynamicDimensionRecord(
+                record.id(),
+                record.dimensionType(),
+                record.generator(),
+                record.biome(),
+                record.storage(),
+                record.seed(),
+                record.generateStructures(),
+                record.structureWhitelist(),
+                record.generateLostCities(),
+                record.lostCitiesProfile(),
+                worldStyle.trim(),
+                record.gameMode(),
+                record.teleportPoint(),
+                record.allowRespawn(),
+                record.save(),
+                record.lostCityBuildingOverrides());
+        DYNAMIC_DIMENSIONS.put(id, updated);
+        refreshLostCitiesProfiles();
+        if (updated.storage() == DynamicDimensionStorageMode.PERSISTENT) {
+            saveManifest(server);
+        }
+        return updated;
+    }
+
+    public static synchronized DynamicDimensionRecord setLostCitiesProfile(MinecraftServer server, ResourceLocation id, String profile) throws IOException {
+        DynamicDimensionRecord record = DYNAMIC_DIMENSIONS.get(id);
+        if (record == null) {
+            throw new IllegalArgumentException("Unknown dynamic dimension: " + id);
+        }
+
+        DynamicDimensionRecord updated = new DynamicDimensionRecord(
+                record.id(),
+                record.dimensionType(),
+                record.generator(),
+                record.biome(),
+                record.storage(),
+                record.seed(),
+                record.generateStructures(),
+                record.structureWhitelist(),
+                record.generateLostCities(),
+                profile.trim(),
+                record.lostCitiesWorldStyle(),
+                record.gameMode(),
+                record.teleportPoint(),
+                record.allowRespawn(),
+                record.save(),
+                record.lostCityBuildingOverrides());
         DYNAMIC_DIMENSIONS.put(id, updated);
         refreshLostCitiesProfiles();
         if (updated.storage() == DynamicDimensionStorageMode.PERSISTENT) {
@@ -173,10 +312,15 @@ public final class DynamicDimensionManager {
                 record.storage(),
                 record.seed(),
                 record.generateStructures(),
+                record.structureWhitelist(),
                 record.generateLostCities(),
+                record.lostCitiesProfile(),
+                record.lostCitiesWorldStyle(),
                 gameMode,
                 record.teleportPoint(),
-                record.allowRespawn());
+                record.allowRespawn(),
+                record.save(),
+                record.lostCityBuildingOverrides());
         DYNAMIC_DIMENSIONS.put(id, updated);
         if (updated.storage() == DynamicDimensionStorageMode.PERSISTENT) {
             saveManifest(server);
@@ -198,10 +342,15 @@ public final class DynamicDimensionManager {
                 record.storage(),
                 record.seed(),
                 record.generateStructures(),
+                record.structureWhitelist(),
                 record.generateLostCities(),
+                record.lostCitiesProfile(),
+                record.lostCitiesWorldStyle(),
                 record.gameMode(),
                 teleportPoint,
-                record.allowRespawn());
+                record.allowRespawn(),
+                record.save(),
+                record.lostCityBuildingOverrides());
         DYNAMIC_DIMENSIONS.put(id, updated);
         if (updated.storage() == DynamicDimensionStorageMode.PERSISTENT) {
             saveManifest(server);
@@ -223,11 +372,126 @@ public final class DynamicDimensionManager {
                 record.storage(),
                 record.seed(),
                 record.generateStructures(),
+                record.structureWhitelist(),
                 record.generateLostCities(),
+                record.lostCitiesProfile(),
+                record.lostCitiesWorldStyle(),
                 record.gameMode(),
                 record.teleportPoint(),
-                allowRespawn);
+                allowRespawn,
+                record.save(),
+                record.lostCityBuildingOverrides());
         DYNAMIC_DIMENSIONS.put(id, updated);
+        if (updated.storage() == DynamicDimensionStorageMode.PERSISTENT) {
+            saveManifest(server);
+        }
+        return updated;
+    }
+
+    public static synchronized DynamicDimensionRecord setSave(MinecraftServer server, ResourceLocation id, boolean save) throws IOException {
+        DynamicDimensionRecord record = DYNAMIC_DIMENSIONS.get(id);
+        if (record == null) {
+            throw new IllegalArgumentException("Unknown dynamic dimension: " + id);
+        }
+
+        DynamicDimensionRecord updated = new DynamicDimensionRecord(
+                record.id(),
+                record.dimensionType(),
+                record.generator(),
+                record.biome(),
+                record.storage(),
+                record.seed(),
+                record.generateStructures(),
+                record.structureWhitelist(),
+                record.generateLostCities(),
+                record.lostCitiesProfile(),
+                record.lostCitiesWorldStyle(),
+                record.gameMode(),
+                record.teleportPoint(),
+                record.allowRespawn(),
+                save,
+                record.lostCityBuildingOverrides());
+        DYNAMIC_DIMENSIONS.put(id, updated);
+        ServerLevel level = server.getLevel(ExtractionCitiesDimensions.levelKey(id));
+        if (level != null) {
+            level.noSave = !save;
+        }
+        if (updated.storage() == DynamicDimensionStorageMode.PERSISTENT) {
+            saveManifest(server);
+        }
+        return updated;
+    }
+
+    public static synchronized DynamicDimensionRecord addLostCityBuildingOverride(MinecraftServer server, ResourceLocation id, LostCityBuildingOverride override) throws IOException {
+        DynamicDimensionRecord record = DYNAMIC_DIMENSIONS.get(id);
+        if (record == null) {
+            throw new IllegalArgumentException("Unknown dynamic dimension: " + id);
+        }
+
+        List<LostCityBuildingOverride> overrides = new ArrayList<>(record.lostCityBuildingOverrides());
+        overrides.removeIf(existing -> existing.anchorX() == override.anchorX() && existing.anchorZ() == override.anchorZ());
+        overrides.add(override);
+        return setLostCityBuildingOverrides(server, id, overrides);
+    }
+
+    public static synchronized Optional<LostCityBuildingOverride> removeLostCityBuildingOverride(MinecraftServer server, ResourceLocation id, int chunkX, int chunkZ) throws IOException {
+        DynamicDimensionRecord record = DYNAMIC_DIMENSIONS.get(id);
+        if (record == null) {
+            throw new IllegalArgumentException("Unknown dynamic dimension: " + id);
+        }
+
+        Optional<LostCityBuildingOverride> removed = record.lostCityBuildingOverrides().stream()
+                .filter(override -> override.affects(chunkX, chunkZ))
+                .findFirst();
+        if (removed.isEmpty()) {
+            return Optional.empty();
+        }
+
+        List<LostCityBuildingOverride> overrides = record.lostCityBuildingOverrides().stream()
+                .filter(override -> override != removed.get())
+                .toList();
+        setLostCityBuildingOverrides(server, id, overrides);
+        return removed;
+    }
+
+    public static synchronized int clearLostCityBuildingOverrides(MinecraftServer server, ResourceLocation id) throws IOException {
+        DynamicDimensionRecord record = DYNAMIC_DIMENSIONS.get(id);
+        if (record == null) {
+            throw new IllegalArgumentException("Unknown dynamic dimension: " + id);
+        }
+
+        int count = record.lostCityBuildingOverrides().size();
+        if (count > 0) {
+            setLostCityBuildingOverrides(server, id, List.of());
+        }
+        return count;
+    }
+
+    private static synchronized DynamicDimensionRecord setLostCityBuildingOverrides(MinecraftServer server, ResourceLocation id, List<LostCityBuildingOverride> overrides) throws IOException {
+        DynamicDimensionRecord record = DYNAMIC_DIMENSIONS.get(id);
+        if (record == null) {
+            throw new IllegalArgumentException("Unknown dynamic dimension: " + id);
+        }
+
+        DynamicDimensionRecord updated = new DynamicDimensionRecord(
+                record.id(),
+                record.dimensionType(),
+                record.generator(),
+                record.biome(),
+                record.storage(),
+                record.seed(),
+                record.generateStructures(),
+                record.structureWhitelist(),
+                record.generateLostCities(),
+                record.lostCitiesProfile(),
+                record.lostCitiesWorldStyle(),
+                record.gameMode(),
+                record.teleportPoint(),
+                record.allowRespawn(),
+                record.save(),
+                List.copyOf(overrides));
+        DYNAMIC_DIMENSIONS.put(id, updated);
+        refreshLostCitiesProfiles();
         if (updated.storage() == DynamicDimensionStorageMode.PERSISTENT) {
             saveManifest(server);
         }
@@ -236,7 +500,7 @@ public final class DynamicDimensionManager {
 
     public static boolean shouldGenerateStructures(ServerLevel level, boolean fallback) {
         return getRecord(level.dimension().location())
-                .map(DynamicDimensionRecord::generateStructures)
+                .map(record -> record.generateStructures() || !record.structureWhitelist().isEmpty())
                 .orElse(fallback);
     }
 
@@ -252,6 +516,21 @@ public final class DynamicDimensionManager {
         return fallback;
     }
 
+    public static boolean shouldGenerateStructure(StructureManager structureManager, Structure structure) {
+        LevelAccessor level = ((StructureManagerAccessor) structureManager).extractioncities$getLevel();
+        return shouldGenerateStructure(level, structureManager.registryAccess(), structure);
+    }
+
+    public static boolean shouldGenerateStructure(LevelAccessor level, RegistryAccess registryAccess, Structure structure) {
+        DynamicDimensionRecord record = dynamicDimensionRecord(level).orElse(null);
+        if (record == null || record.generateStructures()) {
+            return true;
+        }
+
+        ResourceLocation structureId = registryAccess.registryOrThrow(Registries.STRUCTURE).getKey(structure);
+        return structureId != null && record.structureWhitelist().contains(structureId);
+    }
+
     public static boolean shouldGenerateLostCities(ServerLevel level, boolean fallback) {
         return getRecord(level.dimension().location())
                 .map(DynamicDimensionRecord::generateLostCities)
@@ -259,19 +538,25 @@ public final class DynamicDimensionManager {
     }
 
     public static boolean shouldGenerateLostCities(LevelAccessor level, boolean fallback) {
-        if (level instanceof ServerLevel serverLevel) {
-            return shouldGenerateLostCities(serverLevel, fallback);
-        }
-
-        if (level instanceof WorldGenRegion region) {
-            return shouldGenerateLostCities(region.getLevel(), fallback);
-        }
-
-        return fallback;
+        return dynamicDimensionRecord(level)
+                .map(DynamicDimensionRecord::generateLostCities)
+                .orElse(fallback);
     }
 
     public static Optional<ServerLevel> getLevel(MinecraftServer server, ResourceLocation id) {
         return Optional.ofNullable(server.getLevel(ExtractionCitiesDimensions.levelKey(id)));
+    }
+
+    private static Optional<DynamicDimensionRecord> dynamicDimensionRecord(LevelAccessor level) {
+        if (level instanceof ServerLevel serverLevel) {
+            return getRecord(serverLevel.dimension().location());
+        }
+
+        if (level instanceof WorldGenRegion region) {
+            return getRecord(region.getLevel().dimension().location());
+        }
+
+        return Optional.empty();
     }
 
     public static synchronized DeleteResult deleteDimension(MinecraftServer server, ResourceLocation id, boolean force) throws IOException, DynamicDimensionOccupiedException {
@@ -337,6 +622,7 @@ public final class DynamicDimensionManager {
             DynamicDimensionSeeds.unregister(levelKey);
             throw exception;
         }
+        level.noSave = !record.save();
 
         BorderChangeListener borderListener = new BorderChangeListener.DelegateBorderChangeListener(level.getWorldBorder());
         server.overworld().getWorldBorder().addListener(borderListener);
